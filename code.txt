@@ -1,0 +1,125 @@
+#include <ESP8266WiFi.h>
+#include <ESPAsyncWebServer.h>
+#include <SoftwareSerial.h>
+
+#define D5 14
+#define D6 12
+SoftwareSerial mySoftwareSerial(D5, D6); // RX, TX
+#define DFPlayerSerial mySoftwareSerial
+
+const char *ssid = "恭喜发财";  
+const char *password = "yeiyeiyeiyeoo"; 
+
+AsyncWebServer server(80);
+
+bool isSwitchOn = false;      
+bool isMusicPlaying = false;  
+unsigned long previousMillis = 0; 
+unsigned long interval = 1000;  
+unsigned long lastPlayTime = 0; 
+int playDuration = 0; 
+
+void setup() {
+  Serial.begin(115200);
+    DFPlayerSerial.begin(9600);
+  delay(1000);
+
+  
+  WiFi.softAP(ssid, password);
+  Serial.println("WiFi Ready");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.softAPIP());
+
+  
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    String html = "<html><head><meta charset=\"UTF-8\"><title>恭喜发财控制</title></head><body>";
+    html += "<h2>控制面板</h2>";
+    html += "<form action=\"/setInterval\" method=\"get\">";
+    html += "扫描间隔（毫秒）：<input type=\"number\" name=\"interval\" value=\"" + String(interval) + "\">";
+    html += "<input type=\"submit\" value=\"设置\">";
+    html += "</form>";
+    html += "<h3>虚拟开关</h3>";
+    html += "<form action=\"/setSwitch\" method=\"get\">";
+    if (isSwitchOn) {
+      html += "<input type=\"submit\" value=\"关闭虚拟开关\" />";
+    } else {
+      html += "<input type=\"submit\" value=\"开启虚拟开关\" />";
+    }
+    html += "</form>";
+    html += "</body></html>";
+    request->send(200, "text/html", html);
+  });
+
+  
+  server.on("/setInterval", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (request->hasParam("interval")) {
+      interval = request->getParam("interval")->value().toInt();
+    }
+    request->redirect("/");
+  });
+
+  
+  server.on("/setSwitch", HTTP_GET, [](AsyncWebServerRequest *request){
+    isSwitchOn = !isSwitchOn;
+    request->redirect("/");
+  });
+
+ 
+  server.begin();
+
+ 
+  pinMode(13, INPUT);
+}
+
+void loop() {
+  unsigned long currentMillis = millis();
+  
+  if (currentMillis - previousMillis >= interval) {
+    previousMillis = currentMillis;
+
+    int dryContactState = digitalRead(13); 
+    if (dryContactState == LOW) {  
+      if (!isMusicPlaying) {
+        Serial.println("干簧管断开，开始播放01.mp3");
+        playMusic();
+      }
+    } else if (dryContactState == HIGH) { 
+      if (isSwitchOn) {
+        if (millis() - lastPlayTime >= playDuration && isMusicPlaying) {
+          // 播放完一遍音乐后自动停止
+          Serial.println("音乐播放完毕，自动停止");
+          stopMusic();
+        }
+      } else {
+        // 在虚拟开关关闭时，干簧管闭合时停止播放音乐
+        if (isMusicPlaying) {
+          Serial.println("干簧管闭合，停止播放");
+          stopMusic();
+        }
+      }
+    }
+  }
+}
+
+void playMusic() {
+  if (isSwitchOn) {
+    DFPlayerSerial.write(0x7E);
+    DFPlayerSerial.write(0xFF); 
+    DFPlayerSerial.write(0x6C); 
+    DFPlayerSerial.write(0x01); 
+    DFPlayerSerial.write(0x7F); 
+    DFPlayerSerial.write(0xEF);     
+isMusicPlaying = true;
+    lastPlayTime = millis();
+    Serial.println("开始播放音乐");
+  }
+}
+
+void stopMusic() {
+  DFPlayerSerial.write(0x7E);
+  DFPlayerSerial.write(0xFF); 
+  DFPlayerSerial.write(0x16); 
+  DFPlayerSerial.write(0xEF);
+  isMusicPlaying = false;
+  Serial.println("停止播放音乐");
+}
